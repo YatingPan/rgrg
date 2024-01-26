@@ -53,7 +53,8 @@ class ObjectDetector(nn.Module):
         # since we have grayscale images, we need to change the first conv layer to accept 1 in_channel (instead of 3)
         resnet.conv1 = torch.nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
-        # use only the feature extractor of the pre-trained classification model
+        # use only the feature extractor 
+        # of the pre-trained classification model
         # (i.e. use all children but the last 2, which are AdaptiveAvgPool2d and Linear)
         self.backbone = nn.Sequential(*list(resnet.children())[:-2])
 

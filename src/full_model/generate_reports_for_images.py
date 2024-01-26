@@ -168,19 +168,18 @@ def get_model(checkpoint_path):
 
 
 def main():
-    checkpoint_path = ".../___.pt"
+    checkpoint_path = "/home/user/yatpan/yatpan/rgrg/runs/full_model/full_model_checkpoint_val_loss_19.793_overall_steps_155252.pt"
     model = get_model(checkpoint_path)
 
     print("Model instantiated.")
 
     # paths to the images that we want to generate reports for
     images_paths = [
-        ".../___.jpg",
-        ".../___.jpg",
-        ".../___.jpg",
+        "/home/user/yatpan/yatpan/rgrg/datasets/inference-images-jpg/mimic-cxr-jpg/files/p10/p10000032/s50414267/02aa804e-bde0afdd-112c0b34-7bc16630-4e384014.jpg",
+        "/home/user/yatpan/yatpan/rgrg/datasets/inference-images-jpg/mimic-cxr-jpg/files/p10/p10000032/s50414267/174413ec-4ec4c1f7-34ea26b7-c5f994f8-79ef1962.jpg",
     ]
 
-    generated_reports_txt_path = ".../___.txt"
+    generated_reports_txt_path = "/home/user/yatpan/yatpan/rgrg/datasets/inference-images-jpg/mimic-cxr-jpg/files/p10/p10000032/s50414267/generated_reports.txt"
     generated_reports = []
 
     bert_score = evaluate.load("bertscore")

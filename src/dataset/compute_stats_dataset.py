@@ -9,7 +9,18 @@ from src.dataset.constants import ANATOMICAL_REGIONS, IMAGE_IDS_TO_IGNORE
 
 from src.path_datasets_and_weights import path_chest_imagenome
 
-txt_file_to_log_stats = "/u/home/tanida/datasets/dataset_stats.txt"
+"""
+This script is to check the original Chest ImaGenome dataset and compute statistics about it.
+Specifically, it identified the following data points that we should not use:
+1. data points with faulty bbox coordinates, i.e. if the area of the bbox is zero or if the bounding box is out of the image;
+2. data points with faulty bbox names, i.e. if the bbox name is not one of the 29 anatomical regions;
+
+It also finds the following data relationships that we should pay attention to:
+1. the matching between bbox and phrases, i.e. if a bbox has a phrase, multiple phrases, or no phrase at all;
+2. the matching between bbox and abnormality, i.e. if a bbox is normal or abnormal.
+"""
+# output the statistics into a txt file
+txt_file_to_log_stats = "./dataset_stats.txt"
 
 
 def print_stats_counter_dicts(counter_dict):
@@ -65,47 +76,82 @@ def log_stats_to_txt_file(dataset: str, stats: dict) -> None:
 
 def coordinates_faulty(height, width, x1, y1, x2, y2) -> bool:
     """
-    Bbox coordinates are faulty if:
-        - bbox coordinates specify a bbox outside of the image
-        - bbox coordinates specify a bbox of area = 0 (if x1 == x2 or y1 == y2).
-
-    We have to make this check, since for some unknown reason in the chest-imagenome dataset there are:
-        - negative bbox coordinates
-        - bbox coordinates bigger than the given image height and weight
-        - bbox coordinates where x1 == x2 or y1 == y2
-
-    Returns True if coordinates are faulty, False otherwise.
-
-    Firstly checks if area is zero, i.e. x1 == x2 or y1 == y2
-
-    Secondly checks if the bottom right corner (specified by (x2, y2)) is within the image (see smaller_than_zero).
-    Since we always have x1 < x2 and y1 < y2, we know that if x2 < 0, then x1 < x2 <= 0, thus the bbox is not within the image (same for y1, y2).
-
-    Thirdly checks if the top left corner (specified by (x1, y1)) is within the image (see exceeds_limits).
-    We know that if x1 > width, then x2 > x1 >= width, thus the bbox is not within the image (same for y1, y2).
+    Checks if bbox coordinates are faulty:
+    1. if the area of the bbox is zero, i.e. if x1 == x2 or y1 == y2
+    2. if the bounding box is within the image, i.e. if the bottom right corner ((x2, y2)) and the top left corner ((x1, y1)) are within the image
+    Returns True if coordinates are faulty, False otherwise
     """
-    area_of_bbox_is_zero = x1 == x2 or y1 == y2
-    smaller_than_zero = x2 <= 0 or y2 <= 0
-    exceeds_limits = x1 >= width or y1 >= height
-
-    return area_of_bbox_is_zero or smaller_than_zero or exceeds_limits
+    if x1==x2 or y1==y2:
+        return True
+    elif x2 <= 0 or y2 <= 0:
+        return True
+    elif x1 >= width or y1 >= height:
+        return True
+    return False
 
 
 def determine_if_abnormal(attributes_list: list[list]) -> bool:
     """
-    attributes_list is a list of lists that contains attributes corresponding to the phrases describing a specific bbox.
-
-    E.g. the phrases: ['Right lung is clear without pneumothorax.', 'No pneumothorax identified.'] have the attributes_list
-    [['anatomicalfinding|no|lung opacity', 'anatomicalfinding|no|pneumothorax', 'nlp|yes|normal'], ['anatomicalfinding|no|pneumothorax']],
-    where the 1st inner list contains the attributes pertaining to the 1st phrase, and the 2nd inner list contains attributes for the 2nd phrase respectively.
-
-    Phrases describing abnormalities have the attribute 'nlp|yes|abnormal'.
+    attributes in ChestIma is a list of dictionaries, where each dictionary represents a region, and in each dictionary there are lists of attributes, attributes_ids, phrases, phrases_ids.
+    The basic data format for attributes is:
+        "attributes": [
+        {
+            "right apical zone": true,
+            "bbox_name": "right apical zone",
+            "synsets": [
+                "C0929167"
+            ],
+            "name": "Apical zone of right lung",
+            "attributes": [
+                [
+                    "anatomicalfinding|yes|pneumothorax",
+                    "nlp|yes|abnormal"
+                ]
+            ],
+            "attributes_ids": [
+                [
+                    "C1963215;;C0032326",
+                    "C0205161"
+                ]
+            ],
+            "phrases": [
+                "However, a small medial pneumothorax\n has newly occurred."
+            ],
+            "phrase_IDs": [
+                "55916528|6"
+            ],
+            "sections": [
+                "finalreport"
+            ],
+            "comparison_cues": [
+                []
+            ],
+            "temporal_cues": [
+                [
+                    "temporal|yes|acute"
+                ]
+            ],
+            "severity_cues": [
+                [
+                    "severity|yes|mild"
+                ]
+            ],
+            "texture_cues": [
+                [
+                    "texture|yes|lucency"
+                ]
+            ],
+            "object_id": "d7bef063-28053f7a-f27dae40-4035348b-21a36d32_right apical zone"
+        },
+        ...
+    The "attributes" list is extracted from the phrases in the "phrases" list. As the phrase is "However, a small medial pneumothorax\n has newly occurred.", and the attributes is "anatomicalfinding|yes|pneumothorax","nlp|yes|abnormal"
+    One region can have multiple phrases and cooresponding attributes.
+    We determine if a region is abnormal by checking if the attributes list contains "nlp|yes|abnormal".
     """
     for attributes in attributes_list:
         for attribute in attributes:
             if attribute == "nlp|yes|abnormal":
                 return True
-
     # no abnormality could be detected
     return False
 
@@ -114,7 +160,6 @@ def update_stats_for_image(image_scene_graph: dict, stats: dict) -> None:
     is_abnormal_dict = {}
     for attribute in image_scene_graph["attributes"]:
         bbox_name = attribute["bbox_name"]
-
         # there are bbox_names such as "left chest wall" or "right breast" that are not part of the 29 anatomical regions
         # they are considered outliers
         if bbox_name not in ANATOMICAL_REGIONS:
@@ -133,10 +178,8 @@ def update_stats_for_image(image_scene_graph: dict, stats: dict) -> None:
 def get_num_rows(path_csv_file: str) -> int:
     with open(path_csv_file) as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=",")
-
         # skip the first line (i.e. the header line)
         next(csv_reader)
-
         return sum(1 for row in csv_reader)
 
 
@@ -155,7 +198,6 @@ def compute_stats_for_csv_file(dataset: str, path_csv_file: str, image_ids_to_av
     }
     stats["bbox_with_phrases_counter_dict"] = defaultdict(int)
     stats["outlier_bbox_counter_dict"] = defaultdict(int)
-
     stats["num_images"] += get_num_rows(path_csv_file)
 
     with open(path_csv_file) as csv_file:
@@ -215,12 +257,12 @@ def compute_and_print_stats_for_csv_files(csv_files_dict, image_ids_to_avoid):
         stat: 0
         for stat in [
             "total_num_images",
-            "total_num_ignored_images",  # images that are ignored because of failed x-rays
+            "total_num_ignored_images",  
             "total_num_bboxes",
             "total_num_normal_bboxes",
             "total_num_abnormal_bboxes",
             "total_num_bboxes_with_phrases",
-            "total_num_outlier_bboxes",  # bboxes that have bbox names (like 'left breast' etc.) that are not in the 29 anatomical regions are considered outliers
+            "total_num_outlier_bboxes",  
         ]
     }
     total_stats["total_bbox_with_phrases_counter_dict"] = defaultdict(int)  # dict to count how often each of the 29 anatomical regions have phrases

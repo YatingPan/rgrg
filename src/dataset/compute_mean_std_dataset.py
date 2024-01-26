@@ -9,7 +9,6 @@ from src.path_datasets_and_weights import path_mimic_cxr_jpg
 TOL = 1e-4
 COUNTER_PATIENCE = 50
 
-
 def last_and_curr_mean_std_close(curr_mean, curr_std, last_mean_values, last_std_values):
     mean_tol_check = np.abs(curr_mean - last_mean_values) <= TOL
     std_tol_check = np.abs(curr_std - last_std_values) <= TOL

@@ -1,42 +1,33 @@
 """
-Script creates train.csv, valid.csv, test.csv and test-2.csv to train object detector (as a standalone module),
-object detector + binary classifiers, and full model.
+Creates train, valid and test sets to train and evaluate object detector (as a standalone module), object detector + binary classifiers, and full model.
 
-Each row in the csv files specifies information about a single image.
+The original train.csv, valid.csv and test.csv in ChestIma have the following information each row:
+1. Index(int): index of the column, starting from 0. Example: 0
+2. subject_id(str): id of the patient. Example:10000980
+3. study_id(str): id of the study, 1 patient can have one or more studies. Example: 50985099
+4. dicom_id(str): id of the image. Example: 6ad03ed1-97ee17ee-9cf8b320-f7011003-cd93b42d
+5. path(str): path of the image in mimic-cxr. Example: files/p10/p10000980/s50985099/6ad03ed1-97ee17ee-9cf8b320-f7011003-cd93b42d.dcm
+6. ViewPosition(str): “AP”(beams enter from the font to back) or “PA”(beams enter from the back to font)
+ 
+The new processed train.csv have the following information each row:
+1. subject_id(str): same to the original
+2. study_id(str): same to the original
+3. image_id(str): dicom_id
+4. path(str): same to the original
+5. bbox_coordinates(list[list[int]]): bounding boxes’ coordinates of 29 regions in the image. The outlier list has a length less or equal to 29 and the inner liest has a length of 4(x1, x2, y1, y2). Some images don’t have bbox coordinates for all 29 regions. These images and missing images will be stored in log_file_dataset_creation.txt
+6. bbox_labels(list[int]): a list of (usually) 29 region labels per image, corresponding to the bbox_coordinates.
+7. bbox_phrases(list[int]): a list of (usually) 29 phrases per image, corresponding to the bbox_coordinates. If the region doesn’t have phrases, it will be “”
+8. bbox_phrases_exists(list[boolean]): a list of (always) 29 booleans that indicates if a bbox has a phrases. 
+9. bbox_is_abnormal(list[bool]): a list of (always) 29 booleans that indicates if a bbox is abnormal (True) by its phrases
 
-The specific information (i.e. columns) of each row are:
-    - subject_id (str): id of the patient whose image is used
-    - study_id (str): id of the study of that patient (since a patient can have several studies done to document the progression of a disease etc.)
-    - image_id (str): id of the single image
-    - mimic_image_file_path (str): file path to the jpg of the single image on the workstation
-    - bbox_coordinates (List[List[int]]): a nested list where the outer list (usually) has a length of 29 and the inner list always a length of 4 (for 4 bbox coordinates).
-    Contains the bbox coordinates for all (usually 29) regions of a single image. There are some images that don't have bbox coordinates for all 29 regions
-    (see log_file_dataset_creation.txt), thus it's possible that the outer list does not have length 29.
-    - bbox_labels (List[int]): a list of (usually) length 29 that has region/class labels corresponding to the bbox_coordinates. Usually, the bbox_labels list will be
-    of the form [1, 2, 3, ..., 28, 29], i.e. continuously counting from 1 to 29. It starts at 1 since 0 is considered the background class for object detectors.
-    However, since some images don't have bbox coordinates for all 29 regions, it's possible that there are missing numbers in the list.
-    - bbox_phrases (List[str]): a list of (always) length 29 that has the reference phrases for every bbox of a single image. Note that a lot of these reference phrases
-    will be "" (i.e. empty), since a radiology report describing an image will usually not contain phrases for all 29 regions.
-    - bbox_phrase_exists (List[bool]): a list of (always) length 29 that indicates if a bbox has a reference phrase (True) or not
-    - bbox_is_abnormal (List[bool]): a list of (always) length 29 that indicates if a bbox was described as abnormal (True) by its reference phrase or not. bboxes that do
-    not have a reference phrase are considered normal by default.
+The new valid.csv and test.csv have the additional information:
+10. report(str): the “findings” of the mimic-cxr report, corresponding to the image 
 
-The valid.csv, test.csv and test-2.csv have the additional information of:
-    - reference_report (str): the "findings" section of the MIMIC-CXR report corresponding to the image (see function get_reference_report)
+For validation, we only include images that all 29 regions have bbox_coordinates and bbox_labels, to facilitate coding and vectorzition
 
-For the validation set, we only include images that have bbox_coordinates, bbox_labels for all 29 regions.
-This is done because:
-    1. We will usually not evaluate on the whole validation set (which contains 23,953 images), but only on a fraction of it (e.g. 5% - 20%).
-    2. Writing code that evaluates on all 29 regions is easier and more performant (-> e.g. vectorization possible). If there are some images with < 29 regions,
-    then the code has to accomodate them, making vectorization more difficult.
-
-For the test set, we split it into 1 test set that only contains images with bbox_coordinates, bbox_labels for all 29 regions (which are around 95% of all test set images),
-and 1 test set (called test-2.csv) that contains the remaining images that do not have bbox_coordinates, bbox_labels for all 29 regions (the remaining 5% of test set images).
-
-This is done such that we can apply vectorized, efficient code to evaluate the 1st test set (which contains 95% of all test set images),
-and more inefficient code to evaluate the 2nd test set (which only contains 5% of test set images), and of course the results of 1st and 2nd test set are reported together.
-
-The train set contains all train images, even those without bbox_coordinates, bbox_labels for all 29 regions (because we don't need to evaluate on the train set).
+For test,we split the test set into 2 parts:
+1. test_bbox_all_regions.csv: this includes images whose all 29 regions have bbox_coordinates and bbox_labels. This part is about 95% of the original test
+2. test_bbox_not_all_regions.csv: this includes image left
 """
 import csv
 import json
@@ -55,9 +46,10 @@ from src.path_datasets_and_weights import path_chest_imagenome, path_mimic_cxr, 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# to log certain statistics during dataset creation
+#print log to log_file_dataset_creation.txt to check the missing data points 
 txt_file_for_logging = "log_file_dataset_creation.txt"
 
+# out
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s]: %(message)s")
 log = logging.getLogger(__name__)
 
@@ -65,7 +57,6 @@ log = logging.getLogger(__name__)
 # can be useful to create small sample datasets (e.g. of len 200) for testing things
 # if NUM_ROWS_TO_CREATE_IN_NEW_CSV_FILES is None, then all possible rows are created
 NUM_ROWS_TO_CREATE_IN_NEW_CSV_FILES = None
-
 
 def write_stats_to_log_file(
     dataset: str,
@@ -91,29 +82,31 @@ def write_stats_to_log_file(
         f.write(f"\tnum_images_without_29_regions: {num_images_without_29_regions}\n\n")
 
 
+# Create new csv files for train, valid and test
 def write_rows_in_new_csv_file(dataset: str, csv_rows: list[list]) -> None:
     log.info(f"Writing rows into new {dataset}.csv file...")
 
     if dataset == "test":
+    # we write the test set into 2 csv files, one that contains all images that have bbox coordinates for all 29 regions, and one that contains the rest of the images
         csv_rows, csv_rows_less_than_29_regions = csv_rows
 
-    new_csv_file_path = os.path.join(path_full_dataset, dataset)
-    new_csv_file_path += ".csv" if not NUM_ROWS_TO_CREATE_IN_NEW_CSV_FILES else f"-{NUM_ROWS_TO_CREATE_IN_NEW_CSV_FILES}.csv"
+    new_csv_file_path = os.path.join(path_full_dataset, dataset) # e.g. path_full_dataset = "/home/user/yatpan/yatpan/rgrg/datasets/dataset-with-reference-reports", dataset = "train"
+    new_csv_file_path += ".csv" if not NUM_ROWS_TO_CREATE_IN_NEW_CSV_FILES else f"-{NUM_ROWS_TO_CREATE_IN_NEW_CSV_FILES}.csv" # e.g. new_csv_file_path = "/home/user/yatpan/yatpan/rgrg/datasets/dataset-with-reference-reports/train.csv"
 
+    # header of the csv file for train
     header = ["subject_id", "study_id", "image_id", "mimic_image_file_path", "bbox_coordinates", "bbox_labels", "bbox_phrases", "bbox_phrase_exists", "bbox_is_abnormal"]
     if dataset in ["valid", "test"]:
+        # if dataset is valid or test, then we also have the reference report as a column
         header.append("reference_report")
 
     with open(new_csv_file_path, "w") as fp:
         csv_writer = csv.writer(fp)
-
         csv_writer.writerow(header)
         csv_writer.writerows(csv_rows)
 
-    # for the test set, we put all images that do not have bbox coordinates (and corresponding bbox labels) for all 29 regions
-    # into a 2nd csv file called test-2.csv
+    # if dataset is test, we write 2 csv files, one that contains all images that have bbox coordinates for all 29 regions, and one that contains the rest of the images
     if dataset == "test":
-        new_csv_file_path = new_csv_file_path.replace(".csv", "-2.csv")
+        new_csv_file_path = new_csv_file_path.replace("_bbox_all_regions.csv", "_bbox_not_all_regions.csv")
 
         with open(new_csv_file_path, "w") as fp:
             csv_writer = csv.writer(fp)
@@ -135,24 +128,7 @@ def check_coordinate(coordinate: int, dim: int) -> int:
 
 def coordinates_faulty(height, width, x1, y1, x2, y2) -> bool:
     """
-    Bbox coordinates are faulty if:
-        - bbox coordinates specify a bbox outside of the image
-        - bbox coordinates specify a bbox of area = 0 (if x1 == x2 or y1 == y2).
-
-    We have to make this check, since for some unknown reason in the chest-imagenome dataset there are:
-        - negative bbox coordinates
-        - bbox coordinates bigger than the given image height and weight
-        - bbox coordinates where x1 == x2 or y1 == y2
-
-    Returns True if coordinates are faulty, False otherwise.
-
-    Firstly checks if area is zero, i.e. x1 == x2 or y1 == y2
-
-    Secondly checks if the bottom right corner (specified by (x2, y2)) is within the image (see smaller_than_zero).
-    Since we always have x1 < x2 and y1 < y2, we know that if x2 < 0, then x1 < x2 <= 0, thus the bbox is not within the image (same for y1, y2).
-
-    Thirdly checks if the top left corner (specified by (x1, y1)) is within the image (see exceeds_limits).
-    We know that if x1 > width, then x2 > x1 >= width, thus the bbox is not within the image (same for y1, y2).
+    This function is same to the one in src/dataset/compute_dataset_stats.py
     """
     area_of_bbox_is_zero = x1 == x2 or y1 == y2
     smaller_than_zero = x2 <= 0 or y2 <= 0
@@ -163,13 +139,7 @@ def coordinates_faulty(height, width, x1, y1, x2, y2) -> bool:
 
 def determine_if_abnormal(attributes_list: list[list]) -> bool:
     """
-    attributes_list is a list of lists that contains attributes corresponding to the phrases describing a specific bbox.
-
-    E.g. the phrases: ['Right lung is clear without pneumothorax.', 'No pneumothorax identified.'] have the attributes_list
-    [['anatomicalfinding|no|lung opacity', 'anatomicalfinding|no|pneumothorax', 'nlp|yes|normal'], ['anatomicalfinding|no|pneumothorax']],
-    where the 1st inner list contains the attributes pertaining to the 1st phrase, and the 2nd inner list contains attributes for the 2nd phrase respectively.
-
-    Phrases describing abnormalities have the attribute 'nlp|yes|abnormal'.
+    This function is same to the one in src/dataset/compute_dataset_stats.py
     """
     for attributes in attributes_list:
         for attribute in attributes:
@@ -182,24 +152,18 @@ def determine_if_abnormal(attributes_list: list[list]) -> bool:
 
 def convert_phrases_to_single_string(phrases: list[str], sentence_tokenizer) -> str:
     """
-    Takes a list of phrases describing the region of a single bbox and returns a single string.
+    Input: list of phrases in the "attributes" dict for each bbox in the scene graph json file
+    Output: single string that contains all phrases concatenated, so one bbox has one phrase string
 
-    Also performs operations to clean the single string, such as:
+    This function also performs text preprocessing on the phrases:
         - removes irrelevant substrings (like "PORTABLE UPRIGHT AP VIEW OF THE CHEST:")
         - removes whitespace characters (e.g. \n or \t) and redundant whitespaces
         - capitalizes the first word in each sentence
         - removes duplicate sentences
-
-    Args:
-        phrases (list[str]): in the attribute dictionary, phrases is originally a list of strings
-        sentence_tokenizer (spacy sentence tokenizer): used in capitalize_first_word_in_sentence function
-
-    Returns:
-        phrases (str): a single string, with the list of strings concatenated
     """
     def remove_substrings(phrases):
         def remove_wet_read(phrases):
-            """Removes substring like 'WET READ: ___ ___ 8:19 AM' that is irrelevant."""
+            # Removes substring like 'WET READ: ___ ___ 8:19 AM' that is irrelevant.
             # since there can be multiple WET READS's, collect the indices where they start and end in index_slices_to_remove
             index_slices_to_remove = []
             for index in range(len(phrases)):
@@ -229,12 +193,12 @@ def convert_phrases_to_single_string(phrases: list[str], sentence_tokenizer) -> 
         return phrases
 
     def remove_whitespace(phrases):
+        # remove all whitespace characters, e.g. \n or \t
         phrases = " ".join(phrases.split())
         return phrases
 
     def capitalize_first_word_in_sentence(phrases, sentence_tokenizer):
         sentences = sentence_tokenizer(phrases).sents
-
         # capitalize the first letter of each sentence
         phrases = " ".join(sent.text[0].upper() + sent.text[1:] for sent in sentences)
 
@@ -247,7 +211,6 @@ def convert_phrases_to_single_string(phrases: list[str], sentence_tokenizer) -> 
 
         # dicts are insertion ordered as of Python 3.6
         phrases_dict = {phrase: None for phrase in phrases.split(". ")}
-
         phrases = ". ".join(phrase for phrase in phrases_dict)
 
         # add last period
@@ -275,7 +238,7 @@ def get_attributes_dict(image_scene_graph: dict, sentence_tokenizer) -> dict[tup
     for attribute in image_scene_graph["attributes"]:
         region_name = attribute["bbox_name"]
 
-        # ignore region_names such as "left chest wall" or "right breast" that are not part of the 29 anatomical regions
+        # ignore region_names that are not part of the 29 anatomical regions defined in constants.py
         if region_name not in ANATOMICAL_REGIONS:
             continue
 
@@ -335,7 +298,7 @@ def get_total_num_rows(path_csv_file: str) -> int:
 def get_rows(dataset: str, path_csv_file: str, image_ids_to_avoid: set) -> list[list]:
     """
     Args:
-        dataset (str): either "train", "valid" or "test
+        dataset (str): "train", "valid" or "test
         path_csv_file (str): path to one of the csv files in the folder silver_dataset/splits of the chest-imagenome-dataset
         image_ids_to_avoid (set): as specified in "silver_dataset/splits/images_to_avoid.csv"
 

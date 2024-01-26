@@ -1,19 +1,46 @@
 """
 Copied directly from https://github.com/MIT-LCP/mimic-cxr/blob/master/txt/section_parser.py
 
-The section_text is used in create_dataset.py to extract the findings section of the MIMIC-CXR reports,
-which serve as the reference reports during evaluation.
+The section_text is used in create_dataset.py to extract the findings section of the MIMIC-CXR reports, which serve as the reference reports during evaluation.
+
+Data example of a MIMIC-CXR report:
+                                 FINAL REPORT
+ EXAMINATION:  CHEST (PA AND LAT)
+ 
+ INDICATION:  ___F with new onset ascites  // eval for infection
+ 
+ TECHNIQUE:  Chest PA and lateral
+ 
+ COMPARISON:  None.
+ 
+ FINDINGS: 
+ 
+ There is no focal consolidation, pleural effusion or pneumothorax.  Bilateral
+ nodular opacities that most likely represent nipple shadows. The
+ cardiomediastinal silhouette is normal.  Clips project over the left lung,
+ potentially within the breast. The imaged upper abdomen is unremarkable.
+ Chronic deformity of the posterior left sixth and seventh ribs are noted.
+ 
+ IMPRESSION: 
+ 
+ No acute cardiopulmonary process.
 """
+
 import re
 
 
 def section_text(text):
     """Splits text into sections.
+
     Assumes text is in a radiology report format, e.g.:
+
         COMPARISON:  Chest radiograph dated XYZ.
+
         IMPRESSION:  ABC...
-    Given text like this, it will output text from each section,
+
+    Given text like this, it will output text from each section, 
     where the section type is determined by the all caps header.
+
     Returns a three element tuple:
         sections - list containing the text of each section
         section_names - a normalized version of the section name
