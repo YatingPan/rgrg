@@ -550,26 +550,27 @@ def get_datasets_as_dfs(config_file_path):
 
     return datasets_as_dfs
 
-
 def create_run_folder():
     """
-    Run folder will contain a folder for saving the trained weights, a folder for the tensorboard files
+    Run folder will contain a folder for saving the trained weights, a folder for the tensorboard files,
     as well as a config file that specifies the overall parameters used for training.
+    If the folder already exists, it will use the existing folder.
     """
     run_folder_path = os.path.join(path_runs_object_detector, f"run_{RUN}")
     weights_folder_path = os.path.join(run_folder_path, "weights")
     tensorboard_folder_path = os.path.join(run_folder_path, "tensorboard")
 
-    if os.path.exists(run_folder_path):
-        log.error(f"Folder to save run {RUN} already exists at {run_folder_path}.")
-        log.error("Delete the folder or change the run number.")
-        return None
+    if not os.path.exists(run_folder_path):
+        os.makedirs(run_folder_path)
+        log.info(f"Run {RUN} folder created at {run_folder_path}.")
+    else:
+        log.info(f"Run {RUN} folder already exists at {run_folder_path}. Using existing folder.")
 
-    os.mkdir(run_folder_path)
-    os.mkdir(weights_folder_path)
-    os.mkdir(tensorboard_folder_path)
+    if not os.path.exists(weights_folder_path):
+        os.makedirs(weights_folder_path)
 
-    log.info(f"Run {RUN} folder created at {run_folder_path}.")
+    if not os.path.exists(tensorboard_folder_path):
+        os.makedirs(tensorboard_folder_path)
 
     config_file_path = os.path.join(run_folder_path, "run_config.txt")
     config_parameters = {

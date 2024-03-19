@@ -23,6 +23,9 @@ class CustomImageDataset(Dataset):
             # since we have grayscale images, we only have 1 channel and thus use cv2.IMREAD_UNCHANGED to read in the 1 channel
             image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
 
+            # Resize the image to 512x512
+            image = cv2.resize(image, (512, 512))
+
             # bbox_coordinates (List[List[int]]) is the 2nd column of the dataframes
             bbox_coordinates = self.dataset_df.iloc[index, 1]
 

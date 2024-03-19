@@ -37,14 +37,13 @@ class BinaryClassifierRegionAbnormal(nn.Module):
         # logits of shape [batch_size x 29]
         logits = self.classifier(top_region_features).squeeze(dim=-1)
 
-        # only compute loss for logits that correspond to a class that was detected
-        detected_logits = logits[class_detected]
-        detected_region_is_abnormal = region_is_abnormal[class_detected]
 
-        loss = self.loss_fn(detected_logits, detected_region_is_abnormal.type(torch.float32))
-
-        if self.training:
-            return loss
+        if self.training or region_is_abnormal is not None:
+            # only compute loss for logits that correspond to a class that was detected
+            detected_logits = logits[class_detected]
+            detected_region_is_abnormal = region_is_abnormal[class_detected] # cannot set "region_is_abnormal=None" when loading the model, otherwise TypeError: 'NoneType' object is not subscriptable
+            loss = self.loss_fn(detected_logits, detected_region_is_abnormal.type(torch.float32))
+            return loss, predicted_abnormal_regions
         else:
             # for evaluation, we also need the regions that were predicted to be abnormal/normal to compare with the ground truth (region_is_abnormal)
             # and compute recall, precision etc.
@@ -54,4 +53,4 @@ class BinaryClassifierRegionAbnormal(nn.Module):
             predicted_abnormal_regions = logits > -1
 
             # regions that were not detected will be filtered out later (via class_detected) when computing recall, precision etc.
-            return loss, predicted_abnormal_regions
+            return predicted_abnormal_regions
